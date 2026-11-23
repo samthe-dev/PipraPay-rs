@@ -81,6 +81,31 @@ docker build -t piprapay-rs .
 docker run -p 8080:8080 -v piprapay-data:/data -e DATABASE_PATH=/data/piprapay.db piprapay-rs
 ```
 
+### Docker Compose (recommended)
+
+```bash
+docker compose up --build -d
+```
+
+This uses `docker-compose.yml`: the app on port 8080, data in the named
+volume `piprapay-data`, and the internal cron scheduler enabled
+(`CRON_INTERVAL_SECS=60`). Override with environment variables, e.g.
+`SITE_URL=https://pay.example.com CRON_SECRET=<secret> docker compose up -d`.
+First run opens `http://localhost:8080/admin/setup` to create the first
+admin and brand.
+
+Notes:
+
+- The image runs as the `nonroot` user (uid 65532). The named volume in
+  the compose file is initialised with `/data` owned by that user, so it
+  works out of the box. If you use a **bind mount** instead
+  (`-v /host/path:/data`), chown the host directory first:
+  `chown 65532:65532 /host/path`.
+- Image size is ~33 MB (distroless + one static-ish binary); idle RSS
+  is ~8 MB.
+- No in-image `HEALTHCHECK` (distroless has no shell/curl): point your
+  orchestrator at `GET /healthz`.
+
 ## Development
 
 ```bash

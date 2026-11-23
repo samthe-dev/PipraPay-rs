@@ -1,0 +1,25 @@
+services:
+  piprapay-rs:
+    build: .
+    image: piprapay-rs:latest
+    container_name: piprapay-rs
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - piprapay-data:/data
+    environment:
+      DATABASE_PATH: /data/piprapay.db
+      LISTEN_ADDR: 0.0.0.0:8080
+      # Public base URL used in checkout links and device QR codes.
+      SITE_URL: ${SITE_URL:-http://localhost:8080}
+      # Internal cron timer (seconds). Unset to drive settlement only
+      # from an external cron hitting GET /cron/<secret>.
+      CRON_INTERVAL_SECS: ${CRON_INTERVAL_SECS:-60}
+      # Secret for GET /cron/<secret> (falls back to the `cron-job`
+      # value in pp_env when set).
+      CRON_SECRET: ${CRON_SECRET:-}
+      RUST_LOG: ${RUST_LOG:-piprapay_rs=info}
+
+volumes:
+  piprapay-data:
