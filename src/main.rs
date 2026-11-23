@@ -78,7 +78,7 @@ async fn companion(
     let action = form.get("action-companion").cloned().unwrap_or_default();
     let reply = match action.as_str() {
         "login" => companion_login(&state, &form),
-        "account-information" => json!({"status": "false", "title": "Not implemented", "message": "account-information is not implemented yet"}),
+        "account-information" => companion_account_information(&state, &form),
         "sms-transmit-sender" => companion_senders(&state, &form),
         "sms-transmit-bulk" => companion_bulk(&state, &form),
         "delete-sms-data" => json!({"status": "false", "title": "Not implemented", "message": "delete-sms-data is not implemented yet"}),
@@ -126,6 +126,99 @@ fn companion_login(state: &AppState, form: &HashMap<String, String>) -> Value {
         );
     }
     json!({"status": "true", "token": new_otp})
+}
+
+/// Convert a stored UTC `Y-m-d H:i:s` timestamp to the user's timezone
+/// in PHP's `"M d, Y h:i A"` format (e.g. "Nov 23, 2026 02:32 PM").
+/// PHP defaults to Asia/Dhaka (UTC+6, no DST); Rust does the same fixed
+/// offset until a configurable timezone lands with the admin panel.
+fn format_user_time(utc: &str) -> String {
+    use chrono::{Duration, NaiveDateTime};
+    match NaiveDateTime::parse_from_str(utc, "%Y-%m-%d %H:%M:%S") {
+        Ok(dt) => (dt + Duration::hours(6)).format("%b %d, %Y %I:%M %p").to_string(),
+        Err(_) => utc.to_string(),
+    }
+}
+
+/// PHP `account-information`: auth by token, resolve device -> admin
+/// through `pp_browser_log` (cookie = device `d_id`), then return the
+/// device's SMS grouped as stored / used / error with counts.
+///
+/// One deliberate fix: PHP's query excludes `awaiting-review`
+/// (`status NOT IN ("awaiting-review")`), so its own stored branch for
+/// that status is dead and awaiting-review SMS never reach the app.
+/// Rust includes them, in `stored`, as the branch intended.
+fn companion_account_information(state: &AppState, form: &HashMap<String, String>) -> Value {
+    let token = form.get("token").cloned().unwrap_or_default();
+    if token.is_empty() {
+        return err(
+            "Incomplete Information",
+            "Please fill in all required fields before proceeding.",
+        );
+    }
+    let Some(device) = state.db.device_by_token(&token).ok().flatten() else {
+        return err(
+            "Authentication Failed",
+            "Please try again or scan the QR code again.",
+        );
+    };
+    let Some(a_id) = state.db.browser_log_a_id(&device.d_id).ok().flatten() else {
+        return err(
+            "Authentication Failed",
+            "Please try again or scan the QR code again.",
+        );
+    };
+    let Some((full_name, email)) = state.db.admin_by_a_id(&a_id).ok().flatten() else {
+        return err(
+            "Authentication Failed",
+            "Please try again or scan the QR code again.",
+        );
+    };
+    let rows = match state.db.sms_for_device(&device.device_id) {
+        Ok(rows) => rows,
+        Err(_) => {
+            return err(
+                "Oops! Something went wrong",
+                "Your request could not be processed. Please try again.",
+            );
+        }
+    };
+    let mut stored: Vec<Value> = Vec::new();
+    let mut used: Vec<Value> = Vec::new();
+    let mut error: Vec<Value> = Vec::new();
+    for row in rows {
+        let json_status = if row.status == "approved" {
+            "stored".to_string()
+        } else {
+            row.status.clone()
+        };
+        let item = json!({
+            "id": row.id,
+            "sender": row.sender,
+            "message": row.message,
+            "reason": row.reason,
+            "simslot": row.simslot,
+            "timestamp": format_user_time(&row.created_date),
+            "status": json_status,
+        });
+        match row.status.as_str() {
+            "approved" | "awaiting-review" => stored.push(item),
+            "used" => used.push(item),
+            "error" => error.push(item),
+            _ => {}
+        }
+    }
+    json!({
+        "status": "true",
+        "fullname": full_name,
+        "email": email,
+        "stored_count": stored.len(),
+        "used_count": used.len(),
+        "error_count": error.len(),
+        "stored": stored,
+        "used": used,
+        "error": error,
+    })
 }
 
 /// PHP `sms-transmit-sender`: auth by token, then the exact whitelist.

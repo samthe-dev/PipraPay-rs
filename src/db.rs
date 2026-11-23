@@ -70,6 +70,17 @@ pub struct SmsRow {
     pub balance: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct SmsListRow {
+    pub id: i64,
+    pub sender: String,
+    pub message: String,
+    pub reason: String,
+    pub simslot: String,
+    pub created_date: String,
+    pub status: String,
+}
+
 fn ensure_column(conn: &Connection, table: &str, column: &str) -> Result<()> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let mut rows = stmt.query([])?;
@@ -255,6 +266,60 @@ impl Db {
             rusqlite::params![device_id, sender, simslot, status, message, reason, now],
         )?;
         Ok(conn.last_insert_rowid())
+    }
+
+    /// Admin session cookie -> admin id (PHP `account-information`
+    /// resolves the device's `d_id` through `pp_browser_log`).
+    pub fn browser_log_a_id(&self, cookie: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt =
+            conn.prepare("SELECT a_id FROM pp_browser_log WHERE cookie = ?1")?;
+        let mut rows = stmt.query([cookie])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn admin_by_a_id(&self, a_id: &str) -> Result<Option<(String, String)>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT full_name, email FROM pp_admin WHERE a_id = ?1",
+        )?;
+        let mut rows = stmt.query([a_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some((row.get(0)?, row.get(1)?)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// All app-source SMS for a device, newest first, for
+    /// `account-information`.
+    pub fn sms_for_device(&self, device_id: &str) -> Result<Vec<SmsListRow>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, sender, message, reason, simslot, created_date, status
+             FROM pp_sms_data WHERE source = 'app' AND device_id = ?1
+             ORDER BY id DESC",
+        )?;
+        let rows = stmt.query_map([device_id], |row| {
+            Ok(SmsListRow {
+                id: row.get(0)?,
+                sender: row.get(1)?,
+                message: row.get(2)?,
+                reason: row.get(3)?,
+                simslot: row.get(4)?,
+                created_date: row.get(5)?,
+                status: row.get(6)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     pub fn balance_verification(
