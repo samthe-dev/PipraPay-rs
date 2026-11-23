@@ -1,0 +1,6 @@
+/target
+piprapay.db
+piprapay.db-wal
+piprapay.db-shm
+.env
+/data/
