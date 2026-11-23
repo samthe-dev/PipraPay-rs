@@ -71,6 +71,34 @@ pub struct SmsRow {
 }
 
 #[derive(Debug, Clone)]
+pub struct ApiKeyRow {
+    pub brand_id: String,
+    pub api_scopes: String,
+    pub expired_date: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TransactionRow {
+    pub id: i64,
+    pub brand_id: String,
+    pub ref_: String,
+    pub customer_info: String,
+    pub amount: i64,
+    pub processing_fee: i64,
+    pub discount_amount: i64,
+    pub local_net_amount: i64,
+    pub currency: String,
+    pub local_currency: String,
+    pub sender: String,
+    pub trx_id: String,
+    pub gateway_id: String,
+    pub source_info: String,
+    pub metadata: String,
+    pub status: String,
+    pub created_date: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct SmsListRow {
     pub id: i64,
     pub sender: String,
@@ -353,6 +381,230 @@ impl Db {
         Ok(deleted as u64)
     }
 
+    // ---- Merchant API ----
+
+    pub fn api_key_lookup(&self, api_key: &str) -> Result<Option<ApiKeyRow>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT brand_id, api_scopes, expired_date FROM pp_api
+             WHERE api_key = ?1 AND status = 'active'",
+        )?;
+        let mut rows = stmt.query([api_key])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(ApiKeyRow {
+                brand_id: row.get(0)?,
+                api_scopes: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                expired_date: row.get(2)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn domain_status(&self, domain: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt =
+            conn.prepare("SELECT status FROM pp_domain WHERE domain = ?1")?;
+        let mut rows = stmt.query([domain])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn currency_exists(&self, brand_id: &str, code: &str) -> Result<bool> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT 1 FROM pp_currency WHERE brand_id = ?1 AND code = ?2 LIMIT 1",
+        )?;
+        let mut rows = stmt.query(rusqlite::params![brand_id, code])?;
+        Ok(rows.next()?.is_some())
+    }
+
+    pub fn customer_suspend_reason(
+        &self,
+        brand_id: &str,
+        email: &str,
+    ) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT suspend_reason FROM pp_customer
+             WHERE brand_id = ?1 AND email = ?2 AND status = 'suspend'",
+        )?;
+        let mut rows = stmt.query(rusqlite::params![brand_id, email])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get::<_, Option<String>>(0)?.unwrap_or_default()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn customer_exists(&self, brand_id: &str, email: &str) -> Result<bool> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT 1 FROM pp_customer WHERE brand_id = ?1 AND email = ?2 LIMIT 1",
+        )?;
+        let mut rows = stmt.query(rusqlite::params![brand_id, email])?;
+        Ok(rows.next()?.is_some())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_transaction(
+        &self,
+        brand_id: &str,
+        ref_: &str,
+        customer_info: &str,
+        amount: i64,
+        currency: &str,
+        metadata: &str,
+        return_url: Option<&str>,
+        webhook_url: &str,
+        now: &str,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute(
+            "INSERT INTO pp_transaction
+             (brand_id, ref, customer_info, amount, currency, metadata,
+              return_url, webhook_url, created_date, updated_date)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+            rusqlite::params![
+                brand_id,
+                ref_,
+                customer_info,
+                amount,
+                currency,
+                metadata,
+                return_url,
+                webhook_url,
+                now
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn create_customer(
+        &self,
+        ref_: &str,
+        brand_id: &str,
+        name: &str,
+        email: &str,
+        mobile: &str,
+        now: &str,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute(
+            "INSERT INTO pp_customer
+             (ref, brand_id, name, email, mobile, created_date, updated_date)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+            rusqlite::params![ref_, brand_id, name, email, mobile, now],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn transaction_by_ref(&self, ref_: &str) -> Result<Option<TransactionRow>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, brand_id, ref, customer_info, amount, processing_fee,
+             discount_amount, local_net_amount, currency, local_currency,
+             sender, trx_id, gateway_id, source_info, metadata, status,
+             created_date FROM pp_transaction WHERE ref = ?1",
+        )?;
+        let mut rows = stmt.query([ref_])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(TransactionRow {
+                id: row.get(0)?,
+                brand_id: row.get(1)?,
+                ref_: row.get(2)?,
+                customer_info: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                amount: row.get(4)?,
+                processing_fee: row.get(5)?,
+                discount_amount: row.get(6)?,
+                local_net_amount: row.get(7)?,
+                currency: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+                local_currency: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
+                sender: row.get(10)?,
+                trx_id: row.get(11)?,
+                gateway_id: row.get(12)?,
+                source_info: row.get::<_, Option<String>>(13)?.unwrap_or_default(),
+                metadata: row.get::<_, Option<String>>(14)?.unwrap_or_default(),
+                status: row.get(15)?,
+                created_date: row.get(16)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn brand_timezone(&self, brand_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt =
+            conn.prepare("SELECT timezone FROM pp_brands WHERE brand_id = ?1")?;
+        let mut rows = stmt.query([brand_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn gateway_display(
+        &self,
+        brand_id: &str,
+        gateway_id: &str,
+    ) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT display FROM pp_gateways WHERE brand_id = ?1 AND gateway_id = ?2",
+        )?;
+        let mut rows = stmt.query(rusqlite::params![brand_id, gateway_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get::<_, Option<String>>(0)?.unwrap_or_default()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn gateway_slug(
+        &self,
+        brand_id: &str,
+        gateway_id: &str,
+    ) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT slug FROM pp_gateways WHERE brand_id = ?1 AND gateway_id = ?2",
+        )?;
+        let mut rows = stmt.query(rusqlite::params![brand_id, gateway_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get::<_, Option<String>>(0)?.unwrap_or_default()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn update_transaction_status(
+        &self,
+        id: i64,
+        status: &str,
+        source_info: Option<&str>,
+        now: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().expect("db lock");
+        if let Some(source_info) = source_info {
+            conn.execute(
+                "UPDATE pp_transaction SET status = ?1, source_info = ?2,
+                 updated_date = ?3 WHERE id = ?4",
+                rusqlite::params![status, source_info, now, id],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE pp_transaction SET status = ?1, updated_date = ?2 WHERE id = ?3",
+                rusqlite::params![status, now, id],
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn balance_verification(
         &self,
         device_id: &str,
@@ -451,7 +703,7 @@ impl Db {
             let Some(candidates) = next.get(&current) else {
                 continue;
             };
-            for sms_item in candidates {
+            for _sms_item in candidates {
                 let mut chain: Vec<SmsRow> = Vec::new();
                 let mut temp_current = current;
                 let mut temp_next = next.clone();

@@ -1,10 +1,12 @@
 mod db;
+mod merchant;
 mod sms;
 
 use axum::{
     Form, Json, Router,
+    body::Bytes,
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
 };
@@ -15,6 +17,8 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 #[derive(Clone)]
 struct AppState {
     db: Arc<db::Db>,
+    /// Public base URL used for checkout links, e.g. http://localhost:8080.
+    site_url: String,
 }
 
 #[tokio::main]
@@ -32,14 +36,22 @@ async fn main() {
         .parse()
         .expect("LISTEN_ADDR must be a socket address");
 
+    let site_url =
+        std::env::var("SITE_URL").unwrap_or_else(|_| "http://localhost:8080".into());
     let state = AppState {
         db: Arc::new(db::Db::open(&database_path).expect("open SQLite database")),
+        site_url,
     };
     tracing::info!(database_path, %listen_addr, "piprapay-rs starting");
 
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/", post(companion))
+        .route("/api/checkout/redirect", post(api_checkout_redirect))
+        .route("/api/checkout/popup", post(api_checkout_popup))
+        .route("/api/verify-payment", post(api_verify_payment))
+        .route("/api/refund-payment", post(api_refund_payment))
+        .route("/api/{*path}", post(api_unknown))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(listen_addr)
@@ -53,16 +65,61 @@ async fn healthz() -> Json<Value> {
 }
 
 /// Current UTC time in PHP's `Y-m-d H:i:s` format.
-fn now_utc() -> String {
+pub(crate) fn now_utc() -> String {
     chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
-/// PHP `generateItemID()`: 10 random digits (mt_rand 0-9 per digit).
-fn generate_item_id() -> String {
+/// PHP `generateItemID()`: random digits (mt_rand 0-9 per digit).
+/// 10 digits for OTPs and customer refs, 27 for payment IDs.
+pub(crate) fn generate_item_id_len(len: usize) -> String {
     let mut rng = rand::rng();
-    (0..10)
+    (0..len)
         .map(|_| rng.random_range(0..=9).to_string())
         .collect()
+}
+
+fn generate_item_id() -> String {
+    generate_item_id_len(10)
+}
+
+/// Merchant API route wrappers (handlers live in `merchant.rs`).
+async fn api_checkout_redirect(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    merchant::checkout_redirect(headers, body, state.db, state.site_url).await
+}
+
+async fn api_checkout_popup(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    merchant::checkout_popup(headers, body, state.db, state.site_url).await
+}
+
+async fn api_verify_payment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    merchant::verify_payment(headers, body, state.db).await
+}
+
+async fn api_refund_payment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    merchant::refund_payment(headers, body, state.db).await
+}
+
+async fn api_unknown() -> impl IntoResponse {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({"error": {"code": "INVALID_JSON_PAYLOAD", "message": "The JSON payload is invalid or malformed."}})),
+    )
 }
 
 fn err(title: &str, message: &str) -> Value {
@@ -132,7 +189,7 @@ fn companion_login(state: &AppState, form: &HashMap<String, String>) -> Value {
 /// in PHP's `"M d, Y h:i A"` format (e.g. "Nov 23, 2026 02:32 PM").
 /// PHP defaults to Asia/Dhaka (UTC+6, no DST); Rust does the same fixed
 /// offset until a configurable timezone lands with the admin panel.
-fn format_user_time(utc: &str) -> String {
+pub(crate) fn format_user_time(utc: &str) -> String {
     use chrono::{Duration, NaiveDateTime};
     match NaiveDateTime::parse_from_str(utc, "%Y-%m-%d %H:%M:%S") {
         Ok(dt) => (dt + Duration::hours(6)).format("%b %d, %Y %I:%M %p").to_string(),

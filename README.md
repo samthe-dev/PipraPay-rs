@@ -19,6 +19,7 @@ Environment:
 
 - `DATABASE_PATH` (default `piprapay.db`)
 - `LISTEN_ADDR` (default `0.0.0.0:8080`)
+- `SITE_URL` (default `http://localhost:8080`) — base URL used in checkout links
 - `RUST_LOG` (default `piprapay_rs=info`)
 
 ## Endpoints (Phase 1, in progress)
@@ -26,9 +27,17 @@ Environment:
 - `GET /healthz` — `{"status":"ok"}`, for Docker healthcheck.
 - `POST /` — Android companion API, form-encoded, `action-companion`
   is `login`, `account-information`, `sms-transmit-sender`,
-  `sms-transmit-bulk`, or `delete-sms-data`. Handlers are being
-  implemented incrementally; unimplemented actions return
-  `{"status":"false","message":"... not implemented yet"}`.
+  `sms-transmit-bulk`, or `delete-sms-data`. All five are implemented.
+- `POST /api/checkout/redirect` and `POST /api/checkout/popup` —
+  merchant API, JSON body, header `MHS-PIPRAPAY-API-KEY`, scope
+  `create_payment`. Returns `{"pp_id","pp_url"}`.
+- `POST /api/verify-payment` — scope `verify_payment`. Returns the
+  bare transaction object for a `pp_id`.
+- `POST /api/refund-payment` — scope `refund_payment`. Only
+  `completed` transactions can be refunded. bKash tokenized refunds
+  are not configured yet (API gateways are not in Phase 1) and return
+  `REFUND_FAILED`.
+- Errors are HTTP 400 with `{"error":{"code","message"}}`, matching PHP.
 
 ## Docker
 
