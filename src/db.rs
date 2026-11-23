@@ -322,6 +322,37 @@ impl Db {
         Ok(out)
     }
 
+    /// Delete this device's SMS rows in the given statuses.
+    /// Returns how many rows were deleted. PHP `delete-sms-data` maps
+    /// stored -> approved + awaiting-review, used -> used, error -> error.
+    pub fn delete_sms_by_statuses(
+        &self,
+        device_id: &str,
+        statuses: &[&str],
+    ) -> Result<u64> {
+        if statuses.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.conn.lock().expect("db lock");
+        let placeholders = statuses
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut params: Vec<&dyn rusqlite::types::ToSql> = vec![&device_id];
+        for s in statuses {
+            params.push(s);
+        }
+        let deleted = conn.execute(
+            &format!(
+                "DELETE FROM pp_sms_data WHERE device_id = ?1
+                 AND status IN ({placeholders})"
+            ),
+            &*params,
+        )?;
+        Ok(deleted as u64)
+    }
+
     pub fn balance_verification(
         &self,
         device_id: &str,

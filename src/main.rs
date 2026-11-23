@@ -81,7 +81,7 @@ async fn companion(
         "account-information" => companion_account_information(&state, &form),
         "sms-transmit-sender" => companion_senders(&state, &form),
         "sms-transmit-bulk" => companion_bulk(&state, &form),
-        "delete-sms-data" => json!({"status": "false", "title": "Not implemented", "message": "delete-sms-data is not implemented yet"}),
+        "delete-sms-data" => companion_delete(&state, &form),
         "" => err("Oops! Something went wrong", "Your request could not be processed. Please try again."),
         _ => err("Oops! Something went wrong", "Your request could not be processed. Please try again."),
     };
@@ -218,6 +218,50 @@ fn companion_account_information(state: &AppState, form: &HashMap<String, String
         "stored": stored,
         "used": used,
         "error": error,
+    })
+}
+
+/// PHP `delete-sms-data`: auth by token, then delete this device's SMS
+/// rows by bucket — stored=yes deletes approved + awaiting-review,
+/// used=yes deletes used, error=yes deletes error. Only this device's
+/// rows are touched. (The Android app never calls this endpoint, but
+/// the server side exists in PHP, so Rust keeps it.)
+fn companion_delete(state: &AppState, form: &HashMap<String, String>) -> Value {
+    let token = form.get("token").cloned().unwrap_or_default();
+    if token.is_empty() {
+        return err(
+            "Incomplete Information",
+            "Please fill in all required fields before proceeding.",
+        );
+    }
+    let Some(device) = state.db.device_by_token(&token).ok().flatten() else {
+        return err(
+            "Authentication Failed",
+            "Please try again or scan the QR code again.",
+        );
+    };
+    let yes = |key: &str| form.get(key).map(String::as_str) == Some("yes");
+    let mut statuses: Vec<&str> = Vec::new();
+    if yes("stored") {
+        statuses.push("approved");
+        statuses.push("awaiting-review");
+    }
+    if yes("used") {
+        statuses.push("used");
+    }
+    if yes("error") {
+        statuses.push("error");
+    }
+    let deleted = state
+        .db
+        .delete_sms_by_statuses(&device.device_id, &statuses)
+        .unwrap_or(0);
+    let _ = state.db.touch_device_last_sync(device.id, &now_utc());
+    json!({
+        "status": "true",
+        "title": "Deletion Successful",
+        "message": "The selected data has been deleted successfully.",
+        "deleted": deleted,
     })
 }
 
