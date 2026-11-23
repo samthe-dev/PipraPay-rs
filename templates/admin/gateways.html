@@ -1,0 +1,20 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h1 style="margin-top:0;">Gateways</h1>
+<p>Gateways are configured per brand. Payment gateway integrations (bKash tokenized, Stripe, SSLCommerz, …) are not in Phase 1 yet — SMS-verified automation gateways work through the companion app.</p>
+<div class="card">
+  <table>
+    <tr><th>Gateway ID</th><th>Slug</th><th>Display</th><th>Tab</th><th>Status</th></tr>
+    {% for g in gateways %}
+    <tr>
+      <td><code>{{ g.gateway_id }}</code></td>
+      <td>{{ g.slug }}</td>
+      <td>{{ g.display }}</td>
+      <td>{{ g.tab }}</td>
+      <td><span class="pill {{ g.status }}">{{ g.status }}</span></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if gateways.is_empty() %}<p>No gateways configured for this brand yet.</p>{% endif %}
+</div>
+{% endblock %}

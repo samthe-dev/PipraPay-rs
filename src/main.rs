@@ -1,3 +1,4 @@
+mod admin;
 mod db;
 mod merchant;
 mod sms;
@@ -15,10 +16,10 @@ use serde_json::{Value, json};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 #[derive(Clone)]
-struct AppState {
-    db: Arc<db::Db>,
+pub(crate) struct AppState {
+    pub(crate) db: Arc<db::Db>,
     /// Public base URL used for checkout links, e.g. http://localhost:8080.
-    site_url: String,
+    pub(crate) site_url: String,
 }
 
 #[tokio::main]
@@ -47,6 +48,21 @@ async fn main() {
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/", post(companion))
+        .route("/admin", get(admin::dashboard))
+        .route("/admin/setup", get(admin::setup_get).post(admin::setup_post))
+        .route("/admin/login", get(admin::login_get).post(admin::login_post))
+        .route("/admin/2fa", get(admin::twofa_get).post(admin::twofa_post))
+        .route("/admin/logout", get(admin::logout))
+        .route("/admin/dashboard", get(admin::dashboard))
+        .route("/admin/devices", get(admin::devices_get))
+        .route("/admin/devices/connect", post(admin::devices_connect))
+        .route("/admin/devices/{id}/delete", post(admin::devices_delete))
+        .route("/admin/sms", get(admin::sms_get))
+        .route("/admin/sms/{id}/approve", post(admin::sms_approve))
+        .route("/admin/sms/{id}/delete", post(admin::sms_delete))
+        .route("/admin/transactions", get(admin::transactions_get))
+        .route("/admin/brands", get(admin::brands_get).post(admin::brands_post))
+        .route("/admin/gateways", get(admin::gateways_get))
         .route("/api/checkout/redirect", post(api_checkout_redirect))
         .route("/api/checkout/popup", post(api_checkout_popup))
         .route("/api/verify-payment", post(api_verify_payment))
@@ -225,7 +241,7 @@ fn companion_account_information(state: &AppState, form: &HashMap<String, String
             "Please try again or scan the QR code again.",
         );
     };
-    let Some((full_name, email)) = state.db.admin_by_a_id(&a_id).ok().flatten() else {
+    let Some((full_name, email)) = state.db.admin_name_email_by_a_id(&a_id).ok().flatten() else {
         return err(
             "Authentication Failed",
             "Please try again or scan the QR code again.",

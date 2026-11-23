@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }} — PipraPay Admin</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<style>
+body { font-family: system-ui, sans-serif; margin: 0; background: #f6f7f9; color: #1a1a1a; }
+header { background: #111827; color: #fff; padding: 12px 20px; display: flex; gap: 18px; align-items: center; }
+header a { color: #d1d5db; text-decoration: none; }
+header a:hover { color: #fff; }
+header .brand { font-weight: 700; color: #fff; margin-right: 12px; }
+main { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+.card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; vertical-align: top; }
+th { color: #6b7280; font-weight: 600; }
+input, select, button { font: inherit; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; }
+button { background: #111827; color: #fff; border: none; cursor: pointer; }
+button.secondary { background: #fff; color: #111827; border: 1px solid #d1d5db; }
+button.danger { background: #b91c1c; }
+a.button { display: inline-block; padding: 8px 12px; background: #111827; color: #fff; border-radius: 6px; text-decoration: none; }
+.error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; padding: 10px; border-radius: 6px; margin-bottom: 12px; }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: #e5e7eb; }
+.pill.approved, .pill.completed { background: #dcfce7; }
+.pill.awaiting-review, .pill.initiated, .pill.pending { background: #fef9c3; }
+.pill.error, .pill.refunded { background: #fee2e2; }
+.stats { display: flex; gap: 12px; flex-wrap: wrap; }
+.stat { flex: 1; min-width: 140px; }
+.stat b { font-size: 24px; display: block; }
+code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; word-break: break-all; }
+label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 14px; }
+form.inline { display: inline; }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">PipraPay</span>
+  <a href="/admin/dashboard">Dashboard</a>
+  <a href="/admin/devices">Devices</a>
+  <a href="/admin/sms">SMS Data</a>
+  <a href="/admin/transactions">Transactions</a>
+  <a href="/admin/brands">Brands</a>
+  <a href="/admin/gateways">Gateways</a>
+  <span style="margin-left:auto; color:#9ca3af;">{{ admin_name }} · {{ brand_id }}</span>
+  <a href="/admin/logout">Logout</a>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

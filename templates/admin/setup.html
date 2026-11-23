@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>First-run setup — PipraPay Admin</title>
+<style>
+body { font-family: system-ui, sans-serif; background: #f6f7f9; display: flex; justify-content: center; padding-top: 8vh; margin: 0; }
+.card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 24px; width: 360px; }
+input, button { font: inherit; width: 100%; padding: 10px; margin: 6px 0; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box; }
+button { background: #111827; color: #fff; border: none; cursor: pointer; }
+.error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; padding: 10px; border-radius: 6px; margin-bottom: 12px; }
+label { font-weight: 600; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1 style="margin-top:0;">First-run setup</h1>
+  <p>No admin exists yet. Create the first admin and brand (BDT currency is added automatically).</p>
+  {% if let Some(e) = error %}<div class="error">{{ e }}</div>{% endif %}
+  <form method="post" action="/admin/setup">
+    <label>Full name</label>
+    <input name="full_name" type="text" required>
+    <label>Username</label>
+    <input name="username" type="text" autocomplete="username" required>
+    <label>Email</label>
+    <input name="email" type="email" autocomplete="email" required>
+    <label>Password (min 8 characters)</label>
+    <input name="password" type="password" autocomplete="new-password" required>
+    <label>Brand name</label>
+    <input name="brand_name" type="text" required>
+    <button type="submit">Create admin &amp; brand</button>
+  </form>
+</div>
+</body>
+</html>

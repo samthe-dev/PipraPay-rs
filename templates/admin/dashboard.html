@@ -1,0 +1,42 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h1 style="margin-top:0;">Dashboard</h1>
+<div class="card">
+  <h2 style="margin-top:0;">Transactions</h2>
+  <div class="stats">
+  {% for (status, count) in tx_counts %}
+    <div class="stat card"><b>{{ count }}</b><span class="pill {{ status }}">{{ status }}</span></div>
+  {% endfor %}
+  {% if tx_counts.is_empty() %}<p>No transactions yet.</p>{% endif %}
+  </div>
+</div>
+<div class="card">
+  <h2 style="margin-top:0;">SMS Data</h2>
+  <div class="stats">
+  {% for (status, count) in sms_counts %}
+    <div class="stat card"><b>{{ count }}</b><span class="pill {{ status }}">{{ status }}</span></div>
+  {% endfor %}
+  {% if sms_counts.is_empty() %}<p>No SMS data yet.</p>{% endif %}
+  </div>
+</div>
+<div class="stats">
+  <div class="stat card"><b>{{ device_count }}</b>Devices</div>
+  <div class="stat card"><b>{{ brand_count }}</b>Brands</div>
+</div>
+<div class="card">
+  <h2 style="margin-top:0;">Recent transactions</h2>
+  <table>
+    <tr><th>Ref</th><th>Customer</th><th>Amount</th><th>Status</th><th>Date</th></tr>
+    {% for t in recent %}
+    <tr>
+      <td><code>{{ t.ref_ }}</code></td>
+      <td>{{ t.customer }}</td>
+      <td>{{ t.amount }} {{ t.currency }}</td>
+      <td><span class="pill {{ t.status }}">{{ t.status }}</span></td>
+      <td>{{ t.created }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if recent.is_empty() %}<p>No transactions yet.</p>{% endif %}
+</div>
+{% endblock %}

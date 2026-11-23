@@ -1,0 +1,43 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h1 style="margin-top:0;">Devices</h1>
+<div class="card">
+  <h2 style="margin-top:0;">Connect a device</h2>
+  <p>Connect generates a fresh OTP and shows the QR text the Android app scans (<code>{baseUrl}----{otp}</code>).</p>
+  <form method="post" action="/admin/devices/connect">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="site_url" value="{{ site_url }}">
+    <button type="submit">Connect new device</button>
+  </form>
+  {% if let Some(q) = qr %}
+  <div id="qr-panel" style="margin-top:16px;">
+    <p>Device <code>{{ q.device_id }}</code> — scan this in the app:</p>
+    <p><code>{{ q.qr_text }}</code></p>
+    <p>OTP: <code>{{ q.otp }}</code></p>
+  </div>
+  {% endif %}
+</div>
+<div class="card">
+  <h2 style="margin-top:0;">All devices</h2>
+  <table>
+    <tr><th>Device ID</th><th>Name</th><th>Model</th><th>Status</th><th>Last sync</th><th>Created</th><th></th></tr>
+    {% for d in devices %}
+    <tr>
+      <td><code>{{ d.device_id }}</code></td>
+      <td>{{ d.name }}</td>
+      <td>{{ d.model }}</td>
+      <td><span class="pill {{ d.status }}">{{ d.status }}</span></td>
+      <td>{{ d.last_sync }}</td>
+      <td>{{ d.created }}</td>
+      <td>
+        <form class="inline" method="post" action="/admin/devices/{{ d.id }}/delete" onsubmit="return confirm('Delete this device?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="danger" type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if devices.is_empty() %}<p>No devices yet. Connect one above.</p>{% endif %}
+</div>
+{% endblock %}

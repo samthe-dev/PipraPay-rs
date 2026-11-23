@@ -1,0 +1,30 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h1 style="margin-top:0;">Brands</h1>
+<div class="card">
+  <h2 style="margin-top:0;">Add a brand</h2>
+  <form method="post" action="/admin/brands">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Name</label>
+    <input name="name" type="text" required>
+    <label>Email</label>
+    <input name="email" type="email">
+    <p><button type="submit">Add brand</button> <span style="color:#6b7280;">BDT currency is added automatically.</span></p>
+  </form>
+</div>
+<div class="card">
+  <table>
+    <tr><th>Brand ID</th><th>Name</th><th>Email</th><th>Timezone</th><th>Currency</th></tr>
+    {% for b in brands %}
+    <tr>
+      <td><code>{{ b.brand_id }}</code></td>
+      <td>{{ b.name }}</td>
+      <td>{{ b.email }}</td>
+      <td>{{ b.timezone }}</td>
+      <td>{{ b.currency_code }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if brands.is_empty() %}<p>No brands yet.</p>{% endif %}
+</div>
+{% endblock %}

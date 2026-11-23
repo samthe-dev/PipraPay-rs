@@ -1,0 +1,44 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h1 style="margin-top:0;">SMS Data</h1>
+<div class="card">
+  <form method="get" action="/admin/sms">
+    <select name="status">
+      <option value="">All statuses</option>
+      <option value="approved" {% if filter == "approved" %}selected{% endif %}>approved</option>
+      <option value="awaiting-review" {% if filter == "awaiting-review" %}selected{% endif %}>awaiting-review</option>
+      <option value="used" {% if filter == "used" %}selected{% endif %}>used</option>
+      <option value="error" {% if filter == "error" %}selected{% endif %}>error</option>
+    </select>
+    <button type="submit">Filter</button>
+  </form>
+</div>
+<div class="card">
+  <table>
+    <tr><th>ID</th><th>Sender</th><th>Message</th><th>Status</th><th>Reason</th><th>Date</th><th></th></tr>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.id }}</td>
+      <td>{{ r.sender }}</td>
+      <td>{{ r.message }}</td>
+      <td><span class="pill {{ r.status }}">{{ r.status }}</span></td>
+      <td>{{ r.reason }}</td>
+      <td>{{ r.created }}</td>
+      <td style="white-space:nowrap;">
+        {% if r.status == "awaiting-review" %}
+        <form class="inline" method="post" action="/admin/sms/{{ r.id }}/approve">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit">Approve</button>
+        </form>
+        {% endif %}
+        <form class="inline" method="post" action="/admin/sms/{{ r.id }}/delete" onsubmit="return confirm('Delete this SMS?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="danger" type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if rows.is_empty() %}<p>No SMS data found.</p>{% endif %}
+</div>
+{% endblock %}

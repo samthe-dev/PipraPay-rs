@@ -98,6 +98,63 @@ pub struct TransactionRow {
     pub created_date: String,
 }
 
+// ---- Admin panel ----
+
+#[derive(Debug, Clone)]
+pub struct AdminRow {
+    pub id: i64,
+    pub a_id: String,
+    pub full_name: String,
+    pub username: String,
+    pub email: String,
+    pub password: String,
+    pub temp_password: Option<String>,
+    pub status: String,
+    pub role: String,
+    pub twofa_status: String,
+    pub twofa_secret: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionRow {
+    pub cookie: String,
+    pub a_id: String,
+    pub csrf_token: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeviceListRow {
+    pub id: i64,
+    pub device_id: String,
+    pub otp: String,
+    pub name: String,
+    pub model: String,
+    pub android_level: String,
+    pub app_version: String,
+    pub status: String,
+    pub last_sync: String,
+    pub created_date: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct BrandRow {
+    pub brand_id: String,
+    pub name: String,
+    pub email: String,
+    pub timezone: String,
+    pub currency_code: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct GatewayListRow {
+    pub gateway_id: String,
+    pub slug: String,
+    pub display: String,
+    pub tab: String,
+    pub status: String,
+}
+
+
 #[derive(Debug, Clone)]
 pub struct SmsListRow {
     pub id: i64,
@@ -140,6 +197,8 @@ impl Db {
             ensure_column(&conn, table, "created_date")?;
             ensure_column(&conn, table, "updated_date")?;
         }
+        // 003: CSRF token on the session (browser_log) row.
+        ensure_column(&conn, "pp_browser_log", "csrf_token")?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -310,7 +369,7 @@ impl Db {
         }
     }
 
-    pub fn admin_by_a_id(&self, a_id: &str) -> Result<Option<(String, String)>> {
+    pub fn admin_name_email_by_a_id(&self, a_id: &str) -> Result<Option<(String, String)>> {
         let conn = self.conn.lock().expect("db lock");
         let mut stmt = conn.prepare(
             "SELECT full_name, email FROM pp_admin WHERE a_id = ?1",
@@ -603,6 +662,452 @@ impl Db {
             )?;
         }
         Ok(())
+    }
+
+    // ---- Admin panel ----
+
+    pub fn admin_count(&self) -> Result<i64> {
+        let conn = self.conn.lock().expect("db lock");
+        Ok(conn.query_row("SELECT COUNT(*) FROM pp_admin", [], |r| r.get(0))?)
+    }
+
+    pub fn admin_by_login(&self, login: &str) -> Result<Option<AdminRow>> {
+        let conn = self.conn.lock().expect("db lock");
+        let (sql, param): (&str, &str) = if login.contains('@') {
+            ("SELECT id, a_id, full_name, username, email, password, temp_password, status, role, twofa_status, twofa_secret FROM pp_admin WHERE email = ?1", login)
+        } else {
+            ("SELECT id, a_id, full_name, username, email, password, temp_password, status, role, twofa_status, twofa_secret FROM pp_admin WHERE username = ?1", login)
+        };
+        let _ = param;
+        let mut stmt = conn.prepare(sql)?;
+        let mut rows = stmt.query([login])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(AdminRow {
+                id: row.get(0)?,
+                a_id: row.get(1)?,
+                full_name: row.get(2)?,
+                username: row.get(3)?,
+                email: row.get(4)?,
+                password: row.get(5)?,
+                temp_password: row.get(6)?,
+                status: row.get(7)?,
+                role: row.get(8)?,
+                twofa_status: row.get(9)?,
+                twofa_secret: row.get(10)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn admin_by_a_id(&self, a_id: &str) -> Result<Option<AdminRow>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, a_id, full_name, username, email, password, temp_password,
+             status, role, twofa_status, twofa_secret FROM pp_admin WHERE a_id = ?1",
+        )?;
+        let mut rows = stmt.query([a_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(AdminRow {
+                id: row.get(0)?,
+                a_id: row.get(1)?,
+                full_name: row.get(2)?,
+                username: row.get(3)?,
+                email: row.get(4)?,
+                password: row.get(5)?,
+                temp_password: row.get(6)?,
+                status: row.get(7)?,
+                role: row.get(8)?,
+                twofa_status: row.get(9)?,
+                twofa_secret: row.get(10)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn create_admin(
+        &self,
+        a_id: &str,
+        full_name: &str,
+        username: &str,
+        email: &str,
+        password_hash: &str,
+        now: &str,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute(
+            "INSERT INTO pp_admin
+             (a_id, full_name, username, email, password, status, role,
+              created_date, updated_date)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'active', 'admin', ?6, ?6)",
+            rusqlite::params![a_id, full_name, username, email, password_hash, now],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn set_twofa_secret(&self, a_id: &str, secret: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute(
+            "UPDATE pp_admin SET twofa_secret = ?1 WHERE a_id = ?2",
+            rusqlite::params![secret, a_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn create_brand(
+        &self,
+        brand_id: &str,
+        name: &str,
+        email: &str,
+        now: &str,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute(
+            "INSERT INTO pp_brands
+             (brand_id, name, email, timezone, language, currency_code,
+              created_date, updated_date)
+             VALUES (?1, ?2, ?3, 'Asia/Dhaka', 'en', 'BDT', ?4, ?4)",
+            rusqlite::params![brand_id, name, email, now],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn create_currency(&self, brand_id: &str, code: &str) -> Result<i64> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute(
+            "INSERT INTO pp_currency (brand_id, code, symbol, rate)
+             VALUES (?1, ?2, 'Tk', 100000000)",
+            rusqlite::params![brand_id, code],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn create_permission(
+        &self,
+        a_id: &str,
+        brand_id: &str,
+        permission_json: &str,
+        now: &str,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute(
+            "INSERT INTO pp_permission
+             (a_id, brand_id, permission, status, created_date, updated_date)
+             VALUES (?1, ?2, ?3, 'active', ?4, ?4)",
+            rusqlite::params![a_id, brand_id, permission_json, now],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn first_permission_brand(&self, a_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT brand_id FROM pp_permission
+             WHERE a_id = ?1 AND status = 'active' LIMIT 1",
+        )?;
+        let mut rows = stmt.query([a_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn first_brand_id(&self) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt =
+            conn.prepare("SELECT brand_id FROM pp_brands ORDER BY id ASC LIMIT 1")?;
+        let mut rows = stmt.query([])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn create_browser_log(
+        &self,
+        a_id: &str,
+        cookie: &str,
+        csrf_token: &str,
+        now: &str,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute(
+            "INSERT INTO pp_browser_log
+             (a_id, cookie, csrf_token, browser, device, ip, status,
+              created_date, updated_date)
+             VALUES (?1, ?2, ?3, 'Muse', 'server', '127.0.0.1', 'active', ?4, ?4)",
+            rusqlite::params![a_id, cookie, csrf_token, now],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn session_by_cookie(&self, cookie: &str) -> Result<Option<SessionRow>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT cookie, a_id, csrf_token FROM pp_browser_log
+             WHERE cookie = ?1 AND status = 'active'",
+        )?;
+        let mut rows = stmt.query([cookie])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(SessionRow {
+                cookie: row.get(0)?,
+                a_id: row.get(1)?,
+                csrf_token: row.get(2)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn expire_browser_log(&self, cookie: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute(
+            "UPDATE pp_browser_log SET status = 'expired' WHERE cookie = ?1",
+            rusqlite::params![cookie],
+        )?;
+        Ok(())
+    }
+
+    pub fn count_by_status(
+        &self,
+        table: &str,
+        column: &str,
+        extra_where: &str,
+    ) -> Result<Vec<(String, i64)>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {column}, COUNT(*) FROM {table} {extra_where}
+             GROUP BY {column} ORDER BY COUNT(*) DESC"
+        ))?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn list_devices(&self) -> Result<Vec<DeviceListRow>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, device_id, otp, name, model, android_level,
+             app_version, status, last_sync, created_date
+             FROM pp_device ORDER BY id DESC LIMIT 100",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(DeviceListRow {
+                id: row.get(0)?,
+                device_id: row.get(1)?,
+                otp: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                name: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                model: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                android_level: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                app_version: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                status: row.get(7)?,
+                last_sync: row.get(8)?,
+                created_date: row.get(9)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// PHP `device-connect-info`: if a `processing` device already exists
+    /// for this admin session (d_id = session cookie), rotate its OTP;
+    /// otherwise create a new device row. Returns (device_id, otp).
+    pub fn device_connect_info(&self, d_id: &str, now: &str) -> Result<(String, String)> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, device_id FROM pp_device
+             WHERE status = 'processing' AND d_id = ?1 ORDER BY id DESC LIMIT 1",
+        )?;
+        let mut rows = stmt.query([d_id])?;
+        let otp = crate::generate_item_id_len(10);
+        if let Some(row) = rows.next()? {
+            let id: i64 = row.get(0)?;
+            let device_id: String = row.get(1)?;
+            drop(rows);
+            drop(stmt);
+            conn.execute(
+                "UPDATE pp_device SET otp = ?1, updated_date = ?2 WHERE id = ?3",
+                rusqlite::params![otp, now, id],
+            )?;
+            Ok((device_id, otp))
+        } else {
+            drop(rows);
+            drop(stmt);
+            let device_id = crate::generate_item_id_len(10);
+            conn.execute(
+                "INSERT INTO pp_device
+                 (d_id, device_id, otp, status, created_date, updated_date)
+                 VALUES (?1, ?2, ?3, 'processing', ?4, ?4)",
+                rusqlite::params![d_id, device_id, otp, now],
+            )?;
+            Ok((device_id, otp))
+        }
+    }
+
+    pub fn delete_device(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute("DELETE FROM pp_device WHERE id = ?1", rusqlite::params![id])?;
+        Ok(())
+    }
+
+    pub fn list_sms_data(&self, status_filter: Option<&str>) -> Result<Vec<SmsListRow>> {
+        let conn = self.conn.lock().expect("db lock");
+        let (sql, params): (&str, Vec<String>) = match status_filter {
+            Some(s) if !s.is_empty() => (
+                "SELECT id, sender, message, reason, simslot, created_date, status
+                 FROM pp_sms_data WHERE status = ?1 ORDER BY id DESC LIMIT 100",
+                vec![s.to_string()],
+            ),
+            _ => (
+                "SELECT id, sender, message, reason, simslot, created_date, status
+                 FROM pp_sms_data ORDER BY id DESC LIMIT 100",
+                vec![],
+            ),
+        };
+        let mut stmt = conn.prepare(sql)?;
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p as &dyn rusqlite::types::ToSql).collect();
+        let rows = stmt.query_map(&*param_refs, |row| {
+            Ok(SmsListRow {
+                id: row.get(0)?,
+                sender: row.get(1)?,
+                message: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                reason: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                simslot: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                created_date: row.get(5)?,
+                status: row.get(6)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn sms_set_status(&self, id: i64, status: &str, now: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute(
+            "UPDATE pp_sms_data SET status = ?1, updated_date = ?2 WHERE id = ?3",
+            rusqlite::params![status, now, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_sms(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute("DELETE FROM pp_sms_data WHERE id = ?1", rusqlite::params![id])?;
+        Ok(())
+    }
+
+    pub fn list_transactions(
+        &self,
+        brand_id: &str,
+        status_filter: Option<&str>,
+    ) -> Result<Vec<TransactionRow>> {
+        let conn = self.conn.lock().expect("db lock");
+        let (sql, params): (&str, Vec<String>) = match status_filter {
+            Some(s) if !s.is_empty() => (
+                "SELECT id, brand_id, ref, customer_info, amount, processing_fee,
+                 discount_amount, local_net_amount, currency, local_currency,
+                 sender, trx_id, gateway_id, source_info, metadata, status,
+                 created_date FROM pp_transaction
+                 WHERE brand_id = ?1 AND status = ?2 ORDER BY id DESC LIMIT 100",
+                vec![brand_id.to_string(), s.to_string()],
+            ),
+            _ => (
+                "SELECT id, brand_id, ref, customer_info, amount, processing_fee,
+                 discount_amount, local_net_amount, currency, local_currency,
+                 sender, trx_id, gateway_id, source_info, metadata, status,
+                 created_date FROM pp_transaction
+                 WHERE brand_id = ?1 ORDER BY id DESC LIMIT 100",
+                vec![brand_id.to_string()],
+            ),
+        };
+        let mut stmt = conn.prepare(sql)?;
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p as &dyn rusqlite::types::ToSql).collect();
+        let rows = stmt.query_map(&*param_refs, |row| {
+            Ok(TransactionRow {
+                id: row.get(0)?,
+                brand_id: row.get(1)?,
+                ref_: row.get(2)?,
+                customer_info: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                amount: row.get(4)?,
+                processing_fee: row.get(5)?,
+                discount_amount: row.get(6)?,
+                local_net_amount: row.get(7)?,
+                currency: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+                local_currency: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
+                sender: row.get(10)?,
+                trx_id: row.get(11)?,
+                gateway_id: row.get(12)?,
+                source_info: row.get::<_, Option<String>>(13)?.unwrap_or_default(),
+                metadata: row.get::<_, Option<String>>(14)?.unwrap_or_default(),
+                status: row.get(15)?,
+                created_date: row.get(16)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn list_brands(&self) -> Result<Vec<BrandRow>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT brand_id, name, email, timezone, currency_code
+             FROM pp_brands ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(BrandRow {
+                brand_id: row.get(0)?,
+                name: row.get(1)?,
+                email: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                timezone: row.get(3)?,
+                currency_code: row.get(4)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn list_gateways(&self, brand_id: &str) -> Result<Vec<GatewayListRow>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT gateway_id, slug, display, tab, status FROM pp_gateways
+             WHERE brand_id = ?1 ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map([brand_id], |row| {
+            Ok(GatewayListRow {
+                gateway_id: row.get(0)?,
+                slug: row.get(1)?,
+                display: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                tab: row.get(3)?,
+                status: row.get(4)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     pub fn balance_verification(

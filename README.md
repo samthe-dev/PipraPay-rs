@@ -39,6 +39,19 @@ Environment:
   `REFUND_FAILED`.
 - Errors are HTTP 400 with `{"error":{"code","message"}}`, matching PHP.
 
+## Admin panel
+
+- `GET /admin/setup` — first-run setup when no admin exists: creates
+  the first admin + brand + BDT currency + full permission.
+- `GET /admin/login` — username/email + bcrypt password, TOTP 2FA when
+  enabled (`/admin/2fa`), session cookie `pp_admin` in `pp_browser_log`.
+- `GET /admin/dashboard` — transaction/SMS counts, recent transactions.
+- `GET /admin/devices` — list + connect (generates the OTP and the
+  `{baseUrl}----{otp}` QR text the Android app scans).
+- `GET /admin/sms` — SMS data with status filter, approve awaiting-review.
+- `GET /admin/transactions`, `GET /admin/brands`, `GET /admin/gateways`.
+- All admin POSTs require the per-session CSRF token.
+
 ## Docker
 
 ```bash
