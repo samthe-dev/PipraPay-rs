@@ -90,8 +90,11 @@ pub struct TransactionRow {
     pub currency: String,
     pub local_currency: String,
     pub sender: String,
+    pub sender_key: String,
+    pub sender_type: String,
     pub trx_id: String,
     pub gateway_id: String,
+    pub webhook_url: String,
     pub source_info: String,
     pub metadata: String,
     pub status: String,
@@ -152,6 +155,24 @@ pub struct GatewayListRow {
     pub display: String,
     pub tab: String,
     pub status: String,
+}
+
+
+// ---- Cron + webhooks ----
+
+#[derive(Debug, Clone)]
+pub struct SmsMatchRow {
+    pub id: i64,
+    pub amount: i64,
+    pub number: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct WebhookRow {
+    pub id: i64,
+    pub url: String,
+    pub payload: String,
+    pub attempts: i64,
 }
 
 
@@ -566,7 +587,8 @@ impl Db {
         let mut stmt = conn.prepare(
             "SELECT id, brand_id, ref, customer_info, amount, processing_fee,
              discount_amount, local_net_amount, currency, local_currency,
-             sender, trx_id, gateway_id, source_info, metadata, status,
+             sender, sender_key, sender_type, trx_id, gateway_id, webhook_url,
+             source_info, metadata, status,
              created_date FROM pp_transaction WHERE ref = ?1",
         )?;
         let mut rows = stmt.query([ref_])?;
@@ -583,12 +605,15 @@ impl Db {
                 currency: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
                 local_currency: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
                 sender: row.get(10)?,
-                trx_id: row.get(11)?,
-                gateway_id: row.get(12)?,
-                source_info: row.get::<_, Option<String>>(13)?.unwrap_or_default(),
-                metadata: row.get::<_, Option<String>>(14)?.unwrap_or_default(),
-                status: row.get(15)?,
-                created_date: row.get(16)?,
+                sender_key: row.get(11)?,
+                sender_type: row.get::<_, Option<String>>(12)?.unwrap_or_default(),
+                trx_id: row.get(13)?,
+                gateway_id: row.get(14)?,
+                webhook_url: row.get::<_, Option<String>>(15)?.unwrap_or_default(),
+                source_info: row.get::<_, Option<String>>(16)?.unwrap_or_default(),
+                metadata: row.get::<_, Option<String>>(17)?.unwrap_or_default(),
+                status: row.get(18)?,
+                created_date: row.get(19)?,
             }))
         } else {
             Ok(None)
@@ -1021,7 +1046,8 @@ impl Db {
             Some(s) if !s.is_empty() => (
                 "SELECT id, brand_id, ref, customer_info, amount, processing_fee,
                  discount_amount, local_net_amount, currency, local_currency,
-                 sender, trx_id, gateway_id, source_info, metadata, status,
+                 sender, sender_key, sender_type, trx_id, gateway_id, webhook_url,
+                 source_info, metadata, status,
                  created_date FROM pp_transaction
                  WHERE brand_id = ?1 AND status = ?2 ORDER BY id DESC LIMIT 100",
                 vec![brand_id.to_string(), s.to_string()],
@@ -1029,7 +1055,8 @@ impl Db {
             _ => (
                 "SELECT id, brand_id, ref, customer_info, amount, processing_fee,
                  discount_amount, local_net_amount, currency, local_currency,
-                 sender, trx_id, gateway_id, source_info, metadata, status,
+                 sender, sender_key, sender_type, trx_id, gateway_id, webhook_url,
+                 source_info, metadata, status,
                  created_date FROM pp_transaction
                  WHERE brand_id = ?1 ORDER BY id DESC LIMIT 100",
                 vec![brand_id.to_string()],
@@ -1051,12 +1078,15 @@ impl Db {
                 currency: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
                 local_currency: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
                 sender: row.get(10)?,
-                trx_id: row.get(11)?,
-                gateway_id: row.get(12)?,
-                source_info: row.get::<_, Option<String>>(13)?.unwrap_or_default(),
-                metadata: row.get::<_, Option<String>>(14)?.unwrap_or_default(),
-                status: row.get(15)?,
-                created_date: row.get(16)?,
+                sender_key: row.get(11)?,
+                sender_type: row.get::<_, Option<String>>(12)?.unwrap_or_default(),
+                trx_id: row.get(13)?,
+                gateway_id: row.get(14)?,
+                webhook_url: row.get::<_, Option<String>>(15)?.unwrap_or_default(),
+                source_info: row.get::<_, Option<String>>(16)?.unwrap_or_default(),
+                metadata: row.get::<_, Option<String>>(17)?.unwrap_or_default(),
+                status: row.get(18)?,
+                created_date: row.get(19)?,
             })
         })?;
         let mut out = Vec::new();
@@ -1108,6 +1138,233 @@ impl Db {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    // ---- Cron + webhooks ----
+
+    /// PHP `get_env()`: value from pp_env where brand_id='both';
+    /// '--' means empty. Returns None when unset.
+    pub fn env_get(&self, option_name: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT value FROM pp_env
+             WHERE brand_id = 'both' AND option_name = ?1 LIMIT 1",
+        )?;
+        let mut rows = stmt.query([option_name])?;
+        if let Some(row) = rows.next()? {
+            let v: Option<String> = row.get(0)?;
+            match v.as_deref() {
+                None | Some("--") | Some("") => Ok(None),
+                Some(v) => Ok(Some(v.to_string())),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn env_set(&self, option_name: &str, value: &str, now: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("db lock");
+        let n = conn.execute(
+            "UPDATE pp_env SET value = ?1, updated_date = ?2
+             WHERE brand_id = 'both' AND option_name = ?3",
+            rusqlite::params![value, now, option_name],
+        )?;
+        if n == 0 {
+            conn.execute(
+                "INSERT INTO pp_env (brand_id, option_name, value, created_date, updated_date)
+                 VALUES ('both', ?1, ?2, ?3, ?3)",
+                rusqlite::params![option_name, value, now],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn pending_transactions(&self) -> Result<Vec<TransactionRow>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, brand_id, ref, customer_info, amount, processing_fee,
+             discount_amount, local_net_amount, currency, local_currency,
+             sender, sender_key, sender_type, trx_id, gateway_id, webhook_url,
+             source_info, metadata, status, created_date
+             FROM pp_transaction
+             WHERE status = 'pending' AND sender_key NOT IN ('--', '')
+             ORDER BY id DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(TransactionRow {
+                id: row.get(0)?,
+                brand_id: row.get(1)?,
+                ref_: row.get(2)?,
+                customer_info: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                amount: row.get(4)?,
+                processing_fee: row.get(5)?,
+                discount_amount: row.get(6)?,
+                local_net_amount: row.get(7)?,
+                currency: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+                local_currency: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
+                sender: row.get(10)?,
+                sender_key: row.get(11)?,
+                sender_type: row.get::<_, Option<String>>(12)?.unwrap_or_default(),
+                trx_id: row.get(13)?,
+                gateway_id: row.get(14)?,
+                webhook_url: row.get::<_, Option<String>>(15)?.unwrap_or_default(),
+                source_info: row.get::<_, Option<String>>(16)?.unwrap_or_default(),
+                metadata: row.get::<_, Option<String>>(17)?.unwrap_or_default(),
+                status: row.get(18)?,
+                created_date: row.get(19)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn approved_sms_by_key(
+        &self,
+        sender_key: &str,
+        type_: &str,
+        trx_id: &str,
+    ) -> Result<Option<SmsMatchRow>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, amount, number FROM pp_sms_data
+             WHERE sender_key = ?1 AND type = ?2 AND trx_id = ?3 AND status = 'approved'
+             LIMIT 1",
+        )?;
+        let mut rows = stmt.query(rusqlite::params![sender_key, type_, trx_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(SmsMatchRow {
+                id: row.get(0)?,
+                amount: row.get(1)?,
+                number: row.get(2)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn brand_payment_tolerance(
+        &self,
+        brand_id: &str,
+    ) -> Result<Option<(String, String)>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT payment_tolerance, timezone FROM pp_brands WHERE brand_id = ?1",
+        )?;
+        let mut rows = stmt.query([brand_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some((
+                row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            )))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn complete_transaction(
+        &self,
+        id: i64,
+        sender: &str,
+        now: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute(
+            "UPDATE pp_transaction SET status = 'completed', sender = ?1,
+             updated_date = ?2 WHERE id = ?3",
+            rusqlite::params![sender, now, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn active_balance_verifications(
+        &self,
+    ) -> Result<Vec<(String, String, String)>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT device_id, sender_key, type FROM pp_balance_verification
+             WHERE status = 'active'",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn webhook_log_insert(
+        &self,
+        ref_: &str,
+        brand_id: &str,
+        payload: &str,
+        url: &str,
+        now: &str,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute(
+            "INSERT INTO pp_webhook_log
+             (ref, brand_id, payload, url, created_date, updated_date)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+            rusqlite::params![ref_, brand_id, payload, url, now],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn pending_webhooks(&self, limit: i64) -> Result<Vec<WebhookRow>> {
+        let conn = self.conn.lock().expect("db lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, url, payload, attempts FROM pp_webhook_log
+             WHERE status = 'pending' AND attempts < ?1
+             ORDER BY id ASC LIMIT 15",
+        )?;
+        let rows = stmt.query_map([limit], |row| {
+            Ok(WebhookRow {
+                id: row.get(0)?,
+                url: row.get(1)?,
+                payload: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                attempts: row.get(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn webhook_attempt_increment(&self, id: i64, now: &str) -> Result<()> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute(
+            "UPDATE pp_webhook_log SET attempts = attempts + 1, updated_date = ?1
+             WHERE id = ?2",
+            rusqlite::params![now, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn webhook_update_status(
+        &self,
+        id: i64,
+        status: &str,
+        http_code: u16,
+        now: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().expect("db lock");
+        conn.execute(
+            "UPDATE pp_webhook_log SET status = ?1, http_code = ?2, updated_date = ?3
+             WHERE id = ?4",
+            rusqlite::params![status, http_code.to_string(), now, id],
+        )?;
+        Ok(())
     }
 
     pub fn balance_verification(

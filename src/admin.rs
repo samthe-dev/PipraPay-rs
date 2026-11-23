@@ -190,6 +190,7 @@ struct DashboardTemplate {
     sms_counts: Vec<(String, i64)>,
     device_count: i64,
     brand_count: i64,
+    last_cron: String,
     recent: Vec<TxView>,
 }
 
@@ -532,6 +533,12 @@ pub async fn dashboard(
         .map(|(_, c)| c)
         .sum();
     let brand_count = state.db.list_brands().map(|b| b.len() as i64).unwrap_or(0);
+    let last_cron = state
+        .db
+        .env_get("last-cron-invocation")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "--".to_string());
     let recent = state.db
         .list_transactions(&session.brand_id, None)
         .unwrap_or_default()
@@ -548,6 +555,7 @@ pub async fn dashboard(
             sms_counts,
             device_count,
             brand_count,
+            last_cron,
             recent,
         }
         .render()

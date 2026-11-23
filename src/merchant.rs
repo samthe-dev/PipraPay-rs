@@ -388,8 +388,9 @@ pub async fn checkout_popup(
 }
 
 /// The bare transaction object shared by verify-payment and
-/// refund-payment (PHP returns no wrapper around it).
-fn transaction_view(db: &Db, row: &TransactionRow, status: &str) -> Value {
+/// refund-payment (PHP returns no wrapper around it). Also used for
+/// the cron webhook payload.
+pub(crate) fn transaction_view(db: &Db, row: &TransactionRow, status: &str) -> Value {
     let customer: Value =
         serde_json::from_str(&row.customer_info).unwrap_or(json!({}));
     let metadata: Value = serde_json::from_str(&row.metadata).unwrap_or(json!([]));

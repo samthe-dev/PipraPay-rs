@@ -1,4 +1,5 @@
 mod admin;
+mod cron;
 mod db;
 mod merchant;
 mod sms;
@@ -20,6 +21,8 @@ pub(crate) struct AppState {
     pub(crate) db: Arc<db::Db>,
     /// Public base URL used for checkout links, e.g. http://localhost:8080.
     pub(crate) site_url: String,
+    /// Cron run lock: Some(started) while a run is in flight.
+    pub(crate) cron_lock: Arc<std::sync::Mutex<Option<std::time::Instant>>>,
 }
 
 #[tokio::main]
@@ -42,12 +45,27 @@ async fn main() {
     let state = AppState {
         db: Arc::new(db::Db::open(&database_path).expect("open SQLite database")),
         site_url,
+        cron_lock: Arc::new(std::sync::Mutex::new(None)),
     };
     tracing::info!(database_path, %listen_addr, "piprapay-rs starting");
+
+    // Optional internal cron timer (CRON_INTERVAL_SECS); otherwise an
+    // external cron hitting GET /cron/<secret> drives settlement.
+    if let Ok(secs) = std::env::var("CRON_INTERVAL_SECS") {
+        if let Ok(secs) = secs.parse::<u64>() {
+            if secs > 0 {
+                let db = state.db.clone();
+                let lock = state.cron_lock.clone();
+                tokio::spawn(cron::scheduler_loop(db, lock, secs));
+                tracing::info!(interval_secs = secs, "internal cron scheduler enabled");
+            }
+        }
+    }
 
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/", post(companion))
+        .route("/cron/{secret}", get(cron::cron_handler))
         .route("/admin", get(admin::dashboard))
         .route("/admin/setup", get(admin::setup_get).post(admin::setup_post))
         .route("/admin/login", get(admin::login_get).post(admin::login_post))

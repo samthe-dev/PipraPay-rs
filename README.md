@@ -20,6 +20,11 @@ Environment:
 - `DATABASE_PATH` (default `piprapay.db`)
 - `LISTEN_ADDR` (default `0.0.0.0:8080`)
 - `SITE_URL` (default `http://localhost:8080`) — base URL used in checkout links
+- `CRON_SECRET` — secret for `GET /cron/<secret>` (falls back to the
+  `cron-job` value in `pp_env` when set)
+- `CRON_INTERVAL_SECS` — when set, also run settlement on an internal
+  timer every N seconds; otherwise an external cron hitting
+  `/cron/<secret>` drives it
 - `RUST_LOG` (default `piprapay_rs=info`)
 
 ## Endpoints (Phase 1, in progress)
@@ -51,6 +56,23 @@ Environment:
 - `GET /admin/sms` — SMS data with status filter, approve awaiting-review.
 - `GET /admin/transactions`, `GET /admin/brands`, `GET /admin/gateways`.
 - All admin POSTs require the per-session CSRF token.
+
+## Cron settlement + webhooks
+
+- `GET /cron/<secret>` — answers immediately, runs settlement in the
+  background (10-minute run lock, like PHP's `cron.lock`).
+- Settles `pending` transactions against approved SMS (sender_key +
+  type + trx_id) within the brand's payment tolerance: SMS becomes
+  `used`, the transaction becomes `completed`, and a webhook row is
+  queued when the transaction has a webhook URL.
+- Re-runs the longest-chain balance reconcile for every active
+  balance verification row.
+- Delivers pending webhooks (up to 15 per run, attempts limit from
+  `pp_env` `geneal-application-settings-webhook_attempts_limit`,
+  default 1): HTTP 200 = completed, otherwise pending, canceled once
+  attempts reach the limit.
+- Not in Phase 1: the automatic system update check and the currency
+  auto-update fetch.
 
 ## Docker
 
